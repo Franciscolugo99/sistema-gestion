@@ -1,0 +1,13 @@
+﻿Listo. Pasos siguientes:
+1) ReiniciÃ¡ Windows (recomendado) para completar WSL/Virtualization.
+2) AbrÃ­ PowerShell (usuario normal) y corrÃ©:
+   cd "C:\Users\Martin\Documents\sistema-gestion"
+   pnpm -v         # deberÃ­a mostrar versiÃ³n
+3) Levantar base de datos:
+   cd infra
+   docker compose up -d
+   (AbrÃ­ http://localhost:8080 para Adminer)
+4) Crear proyecto NestJS y React (se necesita Internet):
+   cd ..\apps
+   pnpm dlx @nestjs/cli new api --package-manager pnpm --strict
+   pnpm create vite web --template react-ts
