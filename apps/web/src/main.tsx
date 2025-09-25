@@ -1,10 +1,17 @@
-import { StrictMode } from 'react'
-import { createRoot } from 'react-dom/client'
+// main.tsx
+import React from 'react'
+import ReactDOM from 'react-dom/client'
+import App from './App'
+import { ErrorBoundary } from './ErrorBoundary'
 import './index.css'
-import App from './App.tsx'
 
-createRoot(document.getElementById('root')!).render(
-  <StrictMode>
+const root = document.getElementById('root')
+if (!root) {
+  throw new Error('No se encontró el elemento #root en index.html')
+}
+
+ReactDOM.createRoot(root).render(
+  <ErrorBoundary>
     <App />
-  </StrictMode>,
+  </ErrorBoundary>
 )
