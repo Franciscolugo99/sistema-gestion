@@ -1,31 +1,71 @@
-import { Entity, PrimaryGeneratedColumn, Column } from 'typeorm';
+import {
+  Entity,
+  PrimaryGeneratedColumn,
+  Column,
+  CreateDateColumn,
+  UpdateDateColumn,
+  DeleteDateColumn,
+  Index,
+  VersionColumn,
+} from 'typeorm';
+import { decimalTransformer } from '../common/transformers/decimal.transformer';
 
-@Entity()
+export enum ProductStatus {
+  ACTIVE = 'ACTIVE',
+  INACTIVE = 'INACTIVE',
+}
+
+@Entity('products')
+@Index(['nameLower'], { unique: true, where: `"deleted_at" IS NULL` })
+@Index(['skuLower'],  { unique: true, where: `"deleted_at" IS NULL` })
+@Index(['barcode'],   { unique: true, where: `"deleted_at" IS NULL AND "barcode" IS NOT NULL`,
+})
 export class Product {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
-  @Column({ unique: true, nullable: true })
-  sku?: string;
-
-  @Column()
+  @Column({ length: 120 })
   name: string;
 
-  @Column({ nullable: true })
-  barcode?: string;
+  @Column({ length: 120, select: false })
+  nameLower: string; // unicidad case-insensitive
 
-  @Column({ default: 'UN' })
-  unit: string;
+  @Column({ length: 32 })
+  sku: string;
 
-  @Column('numeric', { precision: 14, scale: 2, default: 0 })
-  cost: number;
+  @Column({ length: 32, select: false })
+  skuLower: string;
 
-  @Column('numeric', { precision: 14, scale: 2, default: 0 })
-  price: number;
+  @Column({ type: 'varchar', length: 14, nullable: true })
+  barcode: string | null; // dígitos normalizados (sin espacios/guiones)
 
-  @Column('numeric', { precision: 5, scale: 2, default: 21 })
-  vat: number;
+  @Column({ type: 'decimal', precision: 12, scale: 2, transformer: decimalTransformer })
+price: number; // gracias al transformer lo usás como number en TS
 
-  @Column({ default: true })
-  is_active: boolean;
+  @Column({ type: 'int', default: 0 })
+  stock: number;
+
+  @Column({ type: 'text', nullable: true })
+  description?: string;
+
+  @Column({ type: 'varchar', length: 40, nullable: true })
+  category?: string;
+
+  @Column({ type: 'enum', enum: ProductStatus, default: ProductStatus.ACTIVE })
+  status: ProductStatus;
+
+  @Column({ length: 140, nullable: true })
+  slug?: string;
+
+  @CreateDateColumn()
+  createdAt: Date;
+
+  @UpdateDateColumn()
+  updatedAt: Date;
+
+  @DeleteDateColumn({ name: 'deleted_at', nullable: true })
+  deletedAt?: Date | null;
+
+  @VersionColumn()
+  version: number;
 }

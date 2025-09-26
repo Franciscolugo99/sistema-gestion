@@ -1,18 +1,49 @@
-﻿version: '3.9'
-services:
+﻿services:
   db:
-    image: postgres:15
-    restart: unless-stopped
+    image: postgres:16
+    container_name: sg_db
     environment:
       POSTGRES_USER: sg_user
       POSTGRES_PASSWORD: sg_pass
       POSTGRES_DB: sg_db
-    ports: ['5432:5432']
+    ports:
+      - "5432:5432"
     volumes:
-      - db_data:/var/lib/postgresql/data
-  adminer:
-    image: adminer
-    restart: unless-stopped
-    ports: ['8080:8080']
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sg_user -d sg_db"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  api:
+    build:
+      context: ../apps/api
+      dockerfile: Dockerfile
+    container_name: sg_api
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      PG_HOST: db
+      PG_PORT: "5432"
+      PG_USER: sg_user
+      PG_PASSWORD: sg_pass
+      PG_DATABASE: sg_db
+      CHOKIDAR_USEPOLLING: "true"
+      WATCHPACK_POLLING: "true"
+      CI: "true"  # evita prompts de pnpm en contenedor
+    ports:
+      - "3000:3000"
+      - "9229:9229"
+    volumes:
+      - ../apps/api:/app
+      - api-node-modules:/app/node_modules
+    command: >
+      sh -c "pnpm install --frozen-lockfile || pnpm install --no-frozen-lockfile;
+             pnpm run start:dev"
+
 volumes:
-  db_data:
+  pgdata:
+  api-node-modules:
+

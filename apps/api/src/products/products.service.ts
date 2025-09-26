@@ -1,94 +1,107 @@
-import {
-  Injectable,
-  NotFoundException,
-  BadRequestException,
-} from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
-import { Product } from './product.entity';
+import { ILike, IsNull, Not, Repository } from 'typeorm';
+import { Product, ProductStatus } from './product.entity';
+import { CreateProductDto } from './dto/create-product.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
+import { assertUniqueProductFields } from './validators/unique-field.validator';
+import { isValidBarcode, normalizeBarcode } from './validators/barcode.validator';
 
 @Injectable()
 export class ProductsService {
-  constructor(
-    @InjectRepository(Product)
-    private readonly repo: Repository<Product>,
-  ) {}
+  constructor(@InjectRepository(Product) private repo: Repository<Product>) {}
 
-  findAll() {
-    return this.repo.find();
+  private normalize(p: Partial<Product>) {
+    if (p.name) p.nameLower = p.name.trim().toLowerCase();
+    if (p.sku)  p.skuLower  = p.sku.trim().toLowerCase();
+    if (p.barcode !== undefined) p.barcode = normalizeBarcode(p.barcode);
+    if (p.slug === undefined && p.name) {
+      p.slug = p.name.trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9\s-]/g, '')
+        .replace(/\s+/g, '-')
+        .slice(0, 140);
+    }
+    return p;
   }
 
-  // --- CREATE con reglas de negocio (duplicados) ---
-  async create(data: Partial<Product>) {
-    // Normalización simple
-    if (typeof data.sku === 'string') data.sku = data.sku.trim();
-    if (typeof data.name === 'string') data.name = data.name.trim();
+  async create(dto: CreateProductDto) {
+    if (!isValidBarcode(dto.barcode)) throw new BadRequestException('Código de barras inválido (EAN-8/EAN-13/UPC-A).');
 
-    // Validar duplicados
-    if (data.sku) {
-      const existsSku = await this.repo.findOne({ where: { sku: data.sku } });
-      if (existsSku) {
-        throw new BadRequestException('Ya existe un producto con ese SKU');
-      }
-    }
-    if (data.name) {
-      const existsName = await this.repo.findOne({ where: { name: data.name } });
-      if (existsName) {
-        throw new BadRequestException('Ya existe un producto con ese nombre');
-      }
-    }
+    const toSave = this.normalize({ ...dto });
+    await assertUniqueProductFields(this.repo, {
+      name: toSave.name, sku: toSave.sku, barcode: toSave.barcode ?? null
+    });
 
-    const product = this.repo.create(data);
-
-    try {
-      return await this.repo.save(product);
-    } catch (e: any) {
-      if (e?.code === '23505') {
-        throw new BadRequestException('El SKU o el nombre ya existen');
-      }
-      throw e;
-    }
+    const entity = this.repo.create(toSave);
+    return this.repo.save(entity);
   }
 
-  // --- UPDATE con reglas de negocio (duplicados) ---
   async update(id: string, dto: UpdateProductDto) {
-    const current = await this.repo.findOne({ where: { id } });
-    if (!current) throw new NotFoundException('Producto no encontrado');
+    const product = await this.repo.findOne({ where: { id, deletedAt: IsNull() } });
+    if (!product) throw new NotFoundException('Producto no encontrado.');
 
-    // Normalización
-    if (typeof dto.sku === 'string') dto.sku = dto.sku.trim();
-    if (typeof dto.name === 'string') dto.name = dto.name.trim();
+    const partial = this.normalize({ ...dto });
 
-    if (dto.sku && dto.sku !== current.sku) {
-      const existsSku = await this.repo.findOne({ where: { sku: dto.sku } });
-      if (existsSku) {
-        throw new BadRequestException('Ya existe un producto con ese SKU');
-      }
-    }
-    if (dto.name && dto.name !== current.name) {
-      const existsName = await this.repo.findOne({ where: { name: dto.name } });
-      if (existsName) {
-        throw new BadRequestException('Ya existe un producto con ese nombre');
-      }
+    if (partial.barcode !== undefined && !isValidBarcode(partial.barcode)) {
+      throw new BadRequestException('Código de barras inválido (EAN-8/EAN-13/UPC-A).');
     }
 
-    Object.assign(current, dto);
+    await assertUniqueProductFields(
+      this.repo,
+      {
+        name: partial.name ?? product.name,
+        sku: partial.sku ?? product.sku,
+        barcode: partial.barcode ?? product.barcode ?? null,
+      },
+      id
+    );
 
-    try {
-      return await this.repo.save(current);
-    } catch (e: any) {
-      if (e?.code === '23505') {
-        throw new BadRequestException('El SKU o el nombre ya existen');
-      }
-      throw e;
-    }
+    Object.assign(product, partial);
+    return this.repo.save(product); // respeta @VersionColumn
   }
 
-  async remove(id: string) {
-    const current = await this.repo.findOne({ where: { id } });
-    if (!current) throw new NotFoundException('Producto no encontrado');
-    await this.repo.remove(current);
+  async softDelete(id: string) {
+    const product = await this.repo.findOne({ where: { id, deletedAt: IsNull() } });
+    if (!product) throw new NotFoundException('Producto no encontrado.');
+    await this.repo.softRemove(product);
     return { ok: true };
+  }
+
+  async restore(id: string) {
+    await this.repo.restore(id);
+    return { ok: true };
+  }
+
+  async findById(id: string) {
+    const p = await this.repo.findOne({ where: { id, deletedAt: IsNull() } });
+    if (!p) throw new NotFoundException('Producto no encontrado.');
+    return p;
+  }
+
+  // Paginado + búsqueda simple
+  async search(params: { q?: string; page?: number; limit?: number; status?: ProductStatus | 'ALL' }) {
+    const { q, page = 1, limit = 20, status = 'ALL' } = params;
+    const where: any = { deletedAt: IsNull() };
+    if (q) {
+      // ILike hace búsqueda case-insensitive en PG
+      where.name = ILike(`%${q}%`);
+    }
+    if (status !== 'ALL') where.status = status;
+
+    const [items, total] = await this.repo.findAndCount({
+      where,
+      order: { updatedAt: 'DESC' },
+      skip: (page - 1) * limit,
+      take: Math.min(limit, 100),
+    });
+
+    return {
+      items,
+      page,
+      limit,
+      total,
+      pages: Math.ceil(total / limit),
+    };
   }
 }

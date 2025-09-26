@@ -1,24 +1,21 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
-import { AppController } from './app.controller';
-import { AppService } from './app.service';
 import { ProductsModule } from './products/products.module';
+import 'dotenv/config';
 
 @Module({
   imports: [
     TypeOrmModule.forRoot({
       type: 'postgres',
-      host: process.env.DB_HOST || '127.0.0.1',
-      port: parseInt(process.env.DB_PORT || '5432', 10),
-      username: process.env.DB_USER || 'sg_user',
-      password: process.env.DB_PASS || 'sg_pass',
-      database: process.env.DB_NAME || 'sg_db',
+      host: process.env.PG_HOST || 'db',   // 👈 en Docker, usar "db"
+      port: +(process.env.PG_PORT || 5432),
+      username: process.env.PG_USER || 'sg_user',
+      password: process.env.PG_PASSWORD || 'sg_pass',
+      database: process.env.PG_DATABASE || 'sg_db',
       autoLoadEntities: true,
-      synchronize: true, // ⚠ solo en desarrollo
+      synchronize: false,                  // usamos migraciones
     }),
-    ProductsModule,
+    ProductsModule,                        // 👈 importa el módulo
   ],
-  controllers: [AppController],
-  providers: [AppService],
 })
 export class AppModule {}
