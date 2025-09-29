@@ -1,5 +1,5 @@
 // src/App.tsx
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import axios from "axios";
 
 interface Product {
@@ -10,17 +10,19 @@ interface Product {
   unit: string;
   cost: number;
   price: number;
-  vat: number;
+  vat: number; // % (ej: 21)
   is_active?: boolean;
 }
 
-const API = "/api"; // ← usa el proxy de Vite (vite.config.ts)
+const API = "/api"; // usa el proxy de Vite
 
 export default function App() {
+  // ======= STATE =======
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string>("");
 
+  // form: si tiene id -> modo edición
   const [form, setForm] = useState<Partial<Product>>({
     sku: "",
     name: "",
@@ -31,273 +33,297 @@ export default function App() {
     vat: 21,
   });
 
-  console.log("[App] render");
+  // ======= HELPERS =======
+  const isEditing = Boolean(form.id);
+  const isValid =
+    (form.name || "").trim().length > 0 &&
+    (form.cost ?? 0) >= 0 &&
+    (form.price ?? 0) >= 0 &&
+    (form.vat ?? 0) >= 0;
 
-  const load = async () => {
+  const precioFinal = useMemo(() => {
+    const price = Number(form.price ?? 0);
+    const vat = Number(form.vat ?? 0);
+    return price * (1 + vat / 100);
+  }, [form.price, form.vat]);
+
+  const resetForm = () =>
+    setForm({
+      sku: "",
+      name: "",
+      barcode: "",
+      unit: "UN",
+      cost: 0,
+      price: 0,
+      vat: 21,
+      id: undefined,
+    });
+
+  const onChange = (
+    e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>
+  ) => {
+    const { name, value } = e.target;
+    // normalizamos numéricos
+    if (["cost", "price", "vat"].includes(name)) {
+      const num = value === "" ? "" : Number(value);
+      setForm((f) => ({ ...f, [name]: (num as unknown) as number }));
+    } else {
+      setForm((f) => ({ ...f, [name]: value }));
+    }
+  };
+
+  // ======= API =======
+// helper arriba del todo (justo antes de la función load)
+const pickArray = (payload: any) => {
+  const candidates = [
+    payload,
+    payload?.data,
+    payload?.items,
+    payload?.results,
+    payload?.rows,
+    payload?.records,
+    payload?.data?.items,
+    payload?.data?.results,
+    payload?.data?.rows,
+  ];
+  return candidates.find(Array.isArray) ?? [];
+};
+
+// reemplazo de load
+const load = async () => {
+  setLoading(true);
+  setError("");
+  try {
+    const resp = await axios.get(`${API}/products`, { validateStatus: () => true });
+    console.log("[GET /products]", resp.status, resp.data); // 👈 chequealo en consola
+    if (resp.status >= 400) throw new Error(`GET /products devolvió ${resp.status}`);
+    const list = pickArray(resp.data);
+    setProducts(list as Product[]);
+  } catch (err: any) {
+    console.error(err);
+    setError(err?.message ?? "Error al cargar productos");
+    setProducts([]);
+  } finally {
+    setLoading(false);
+  }
+};
+
+
+  const save = async (e: React.FormEvent) => {
+  e.preventDefault();
+  if (!isValid) return;
+
+  setLoading(true);
+  setError("");
+
+  const clean = (s?: string | null) => {
+    const v = (s ?? "").toString().trim();
+    return v === "" ? undefined : v;
+  };
+  const cleanBarcode = (s?: string | null) => {
+    const digits = (s ?? "").replace(/\D+/g, "");
+    return digits === "" ? undefined : digits;
+  };
+
+  // ⬇⬇⬇  SIN is_active
+  const payload = {
+    sku: clean(form.sku),
+    name: clean(form.name)!,
+    barcode: cleanBarcode(form.barcode),
+    unit: clean(form.unit) ?? "UN",
+    cost: form.cost === undefined || form.cost === null ? 0 : Number(form.cost),
+    price: form.price === undefined || form.price === null ? 0 : Number(form.price),
+    vat: form.vat === undefined || form.vat === null ? 0 : Number(form.vat),
+  };
+
+  try {
+    if (isEditing && form.id) {
+      await axios.patch(`${API}/products/${form.id}`, payload);
+    } else {
+      await axios.post(`${API}/products`, payload);
+    }
+    await load();
+    resetForm();
+  } catch (err: any) {
+    const msg =
+      err?.response?.data?.message ||
+      err?.response?.data?.error ||
+      err?.message ||
+      "Error al guardar";
+    setError(msg);
+  } finally {
+    setLoading(false);
+  }
+};
+
+
+
+  const handleEdit = (p: Product) => {
+    // Carga el producto al form para editar
+    setForm({
+      id: p.id,
+      sku: p.sku ?? "",
+      name: p.name,
+      barcode: p.barcode ?? "",
+      unit: p.unit ?? "UN",
+      cost: p.cost ?? 0,
+      price: p.price ?? 0,
+      vat: p.vat ?? 21,
+      is_active: p.is_active ?? true,
+    });
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+
+  const handleDelete = async (id: string) => {
+    if (!confirm("¿Seguro que querés eliminar este producto?")) return;
     setLoading(true);
     setError("");
     try {
-      const { data } = await axios.get(`${API}/products`);
-
-      // Normalización flexible:
-      // - si API devuelve [] lo tomamos directo
-      // - si API devuelve { data: [...] } usamos data
-      // - sino, dejamos []
-      let list: unknown = data as unknown;
-      if (
-        list &&
-        typeof list === "object" &&
-        !Array.isArray(list) &&
-        "data" in (list as Record<string, unknown>)
-      ) {
-        list = (list as any).data;
-      }
-      setProducts(Array.isArray(list) ? (list as Product[]) : []);
-    } catch (e: any) {
-      console.error("Error load():", e);
-      const msg =
-        e?.response?.data?.message ||
-        e?.message ||
-        "No se pudo cargar el listado.";
-      setError(String(msg));
-      setProducts([]); // fallback seguro
+      await axios.delete(`${API}/products/${id}`);
+      await load();
+      // si estabas editando justo este id, reseteamos
+      if (form.id === id) resetForm();
+    } catch (err: any) {
+      console.error(err);
+      setError(err?.response?.data?.message ?? err?.message ?? "Error al eliminar");
     } finally {
       setLoading(false);
     }
   };
 
+  // ======= EFFECTS =======
   useEffect(() => {
-    console.log("[App] useEffect: cargando productos...");
-    load().catch((e) => console.error("Error load() fuera de try:", e));
+    load();
   }, []);
 
-  const handleChange = (
-    e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>
-  ) => {
-    const { name, value } = e.target;
-    setForm((prev) => ({
-      ...prev,
-      [name]:
-        name === "cost" || name === "price" || name === "vat"
-          ? Number(value)
-          : value,
-    }));
-  };
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setError("");
-    try {
-      if (!form.name || !form.name.trim()) {
-        setError("El nombre es obligatorio.");
-        return;
-      }
-      const payload = {
-        sku: form.sku || undefined,
-        name: form.name.trim(),
-        barcode: form.barcode || undefined,
-        unit: form.unit || "UN",
-        cost: Number(form.cost ?? 0),
-        price: Number(form.price ?? 0),
-        vat: Number(form.vat ?? 21),
-      };
-      console.log("POST /products payload:", payload);
-      await axios.post(`${API}/products`, payload);
-
-      // limpiar form
-      setForm({
-        sku: "",
-        name: "",
-        barcode: "",
-        unit: "UN",
-        cost: 0,
-        price: 0,
-        vat: 21,
-      });
-
-      // recargar listado
-      await load();
-    } catch (err: any) {
-      console.error("Error al crear producto:", err);
-      const msg =
-        err?.response?.data?.message ||
-        err?.message ||
-        "No se pudo guardar. Revisá la consola.";
-      setError(Array.isArray(msg) ? msg.join(" • ") : String(msg));
-    }
-  };
-
-  const finalPrice = (
-    Number(form.price ?? 0) * (1 + Number(form.vat ?? 0) / 100)
-  ).toFixed(2);
-
+  // ======= UI =======
   return (
-    <div
-      style={{
-        padding: "2rem",
-        color: "white",
-        background: "#111",
-        minHeight: "100vh",
-        fontFamily: "system-ui, Segoe UI, Roboto, Helvetica, Arial",
-      }}
-    >
-      <h1>Sistema de Gestión — Productos</h1>
+    <div style={{ maxWidth: 1100, margin: "0 auto", padding: 24 }}>
+      <h1 style={{ fontSize: 42, marginBottom: 16 }}>Sistema de Gestión — Productos</h1>
 
-      {/* Formulario */}
-      <form
-        onSubmit={handleSubmit}
-        style={{
-          display: "grid",
-          gap: 10,
-          gridTemplateColumns: "repeat(8, 1fr)",
-          marginBottom: 18,
-        }}
-      >
-        <label style={{ display: "grid", gap: 6 }}>
-          <span>SKU</span>
-          <input
-            name="sku"
-            placeholder="Ej: P001"
-            value={form.sku ?? ""}
-            onChange={handleChange}
-          />
-        </label>
+      <form onSubmit={save} style={{ display: "grid", gap: 8, gridTemplateColumns: "1fr 2fr 2fr 1fr 1fr 1fr 1fr", alignItems: "end" }}>
+        <div>
+          <label>SKU</label>
+          <input name="sku" value={form.sku ?? ""} onChange={onChange} placeholder="Ej: P001" />
+        </div>
 
-        <label style={{ display: "grid", gap: 6, gridColumn: "span 2" }}>
-          <span>Nombre *</span>
-          <input
-            name="name"
-            placeholder="Ej: Coca Cola 1L"
-            value={form.name ?? ""}
-            onChange={handleChange}
-            required
-          />
-        </label>
+        <div>
+          <label>Nombre *</label>
+          <input name="name" value={form.name ?? ""} onChange={onChange} placeholder="Ej: Coca Cola 1L" required />
+        </div>
 
-        <label style={{ display: "grid", gap: 6 }}>
-          <span>Código de barras</span>
-          <input
-            name="barcode"
-            placeholder="Ej: 7791234567890"
-            value={form.barcode ?? ""}
-            onChange={handleChange}
-          />
-        </label>
+        <div>
+          <label>Código de barras</label>
+          <input name="barcode" value={form.barcode ?? ""} onChange={onChange} placeholder="Ej: 7791234567890" />
+        </div>
 
-        <label style={{ display: "grid", gap: 6 }}>
-          <span>Unidad</span>
-          <input
-            name="unit"
-            placeholder="UN / KG / LT"
-            value={form.unit ?? "UN"}
-            onChange={handleChange}
-          />
-        </label>
+        <div>
+          <label>Unidad</label>
+          <input name="unit" value={form.unit ?? "UN"} onChange={onChange} />
+        </div>
 
-        <label style={{ display: "grid", gap: 6 }}>
-          <span>Costo</span>
-          <input
-            type="number"
-            step="0.01"
-            min="0"
-            name="cost"
-            placeholder="0.00"
-            value={Number(form.cost ?? 0)}
-            onChange={handleChange}
-          />
-        </label>
+        <div>
+          <label>Costo</label>
+          <input name="cost" type="number" step="0.01" value={form.cost ?? 0} onChange={onChange} />
+        </div>
 
-        <label style={{ display: "grid", gap: 6 }}>
-          <span>Precio</span>
-          <input
-            type="number"
-            step="0.01"
-            min="0"
-            name="price"
-            placeholder="0.00"
-            value={Number(form.price ?? 0)}
-            onChange={handleChange}
-          />
-        </label>
+        <div>
+          <label>Precio</label>
+          <input name="price" type="number" step="0.01" value={form.price ?? 0} onChange={onChange} />
+        </div>
 
-        <label style={{ display: "grid", gap: 6 }}>
-          <span>IVA %</span>
-          <select
-            name="vat"
-            value={Number(form.vat ?? 21)}
-            onChange={handleChange}
-          >
+        <div>
+          <label>IVA %</label>
+          <select name="vat" value={form.vat ?? 21} onChange={onChange}>
+            <option value={0}>0%</option>
             <option value={10.5}>10.5%</option>
             <option value={21}>21%</option>
             <option value={27}>27%</option>
           </select>
-        </label>
+        </div>
 
-        <div style={{ display: "flex", alignItems: "end" }}>
-          <button type="submit" style={{ width: "100%" }}>
-            Agregar
+        <div style={{ gridColumn: "1 / -1", display: "flex", gap: 8, marginTop: 8 }}>
+          <button type="submit" disabled={!isValid || loading}>
+            {isEditing ? "Guardar cambios" : "Agregar"}
           </button>
+          {isEditing && (
+            <button type="button" onClick={resetForm} disabled={loading}>
+              Cancelar edición
+            </button>
+          )}
         </div>
       </form>
 
-      {/* Preview precio final */}
-      <div style={{ marginBottom: 12, color: "#ccc" }}>
-        Precio final (con IVA): <b>${finalPrice}</b>
+      <div style={{ marginTop: 8, marginBottom: 16 }}>
+        <strong>Precio final (con IVA): </strong>${precioFinal.toFixed(2)}
       </div>
 
       {error && (
-        <div style={{ marginBottom: 12, color: "#ff8a8a" }}>{error}</div>
+        <div style={{ margin: "12px 0", color: "#ff6b6b" }}>
+          <strong>Error:</strong> {error}
+        </div>
       )}
 
-      {/* Listado */}
-      <h2>Listado</h2>
+      <h2 style={{ marginTop: 24 }}>Listado</h2>
 
-      {loading ? (
-        <div style={{ color: "#aaa" }}>Cargando...</div>
-      ) : (
-        <table
-          width="100%"
-          cellPadding={8}
-          style={{ borderCollapse: "collapse", background: "#1b1b1b" }}
-        >
+      <div style={{ overflowX: "auto" }}>
+        <table style={{ width: "100%", borderCollapse: "collapse" }}>
           <thead>
             <tr>
-              <th align="left">SKU</th>
-              <th align="left">Nombre</th>
-              <th align="right">Costo</th>
-              <th align="right">Precio</th>
-              <th align="right">IVA</th>
-              <th align="right">Precio Final</th>
+              <th style={th}>SKU</th>
+              <th style={th}>Nombre</th>
+              <th style={th}>Costo</th>
+              <th style={th}>Precio</th>
+              <th style={th}>IVA</th>
+              <th style={th}>Precio Final</th>
+              <th style={th} />
             </tr>
           </thead>
           <tbody>
-            {products.length === 0 ? (
+            {products.map((p) => {
+              const finalPrice = (p.price ?? 0) * (1 + (p.vat ?? 0) / 100);
+              return (
+                <tr key={p.id}>
+                  <td style={td}>{p.sku}</td>
+                  <td style={td}>{p.name}</td>
+                  <td style={td}>{p.cost}</td>
+                  <td style={td}>{p.price}</td>
+                  <td style={td}>{p.vat}%</td>
+                  <td style={td}>{finalPrice.toFixed(2)}</td>
+                  <td style={{ ...td, textAlign: "right", whiteSpace: "nowrap" }}>
+                    <button onClick={() => handleEdit(p)} disabled={loading} style={{ marginRight: 8 }}>
+                      Editar
+                    </button>
+                    <button onClick={() => handleDelete(p.id)} disabled={loading}>
+                      Eliminar
+                    </button>
+                  </td>
+                </tr>
+              );
+            })}
+            {products.length === 0 && !loading && (
               <tr>
-                <td colSpan={6} style={{ color: "#888" }}>
-                  Sin productos todavía.
+                <td style={td} colSpan={7}>
+                  Sin productos
                 </td>
               </tr>
-            ) : (
-              products.map((p) => {
-                const vat = Number(p.vat ?? 0);
-                const price = Number(p.price ?? 0);
-                return (
-                  <tr key={p.id} style={{ borderTop: "1px solid #333" }}>
-                    <td>{p.sku}</td>
-                    <td>{p.name}</td>
-                    <td align="right">{Number(p.cost ?? 0)}</td>
-                    <td align="right">{price}</td>
-                    <td align="right">{vat}%</td>
-                    <td align="right">
-                      {(price * (1 + vat / 100)).toFixed(2)}
-                    </td>
-                  </tr>
-                );
-              })
             )}
           </tbody>
         </table>
-      )}
+      </div>
     </div>
   );
 }
+
+// ======= estilos mínimos inline para la tabla (podés reemplazar por tu CSS) =======
+const th: React.CSSProperties = {
+  textAlign: "left",
+  padding: "10px 8px",
+  borderBottom: "1px solid #333",
+  fontWeight: 600,
+};
+
+const td: React.CSSProperties = {
+  padding: "10px 8px",
+  borderBottom: "1px solid #222",
+};

@@ -1,41 +1,49 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsString, IsOptional, IsNumber, IsPositive, Min, MaxLength, Matches, IsEnum } from 'class-validator';
-import { Transform } from 'class-transformer';
+import {
+  IsString, IsOptional, IsNumber, IsPositive, Min, MaxLength, Matches, IsEnum, IsIn,
+} from 'class-validator';
+import { Transform, Type } from 'class-transformer';
 import { ProductStatus } from '../product.entity';
 
 const trim = () => Transform(({ value }) => (typeof value === 'string' ? value.trim() : value));
 
 export class CreateProductDto {
-  @ApiProperty({ example: 'Café Molido 500g', description: 'Nombre visible del producto' })
-  @IsString() @trim() @MaxLength(120)
-  name: string;
+  @ApiProperty() @IsString() @trim() @MaxLength(120)
+  name!: string;
 
-  @ApiProperty({ example: 'CAF-500', description: 'Código SKU único' })
-  @IsString() @trim() @Matches(/^[A-Za-z0-9_\-\.]{3,32}$/, { message: 'SKU inválido' })
-  sku: string;
+  @ApiProperty() @IsString() @trim() @Matches(/^[A-Za-z0-9_\-\.]{3,32}$/)
+  sku!: string;
 
-  @ApiPropertyOptional({ example: '7791234567898', description: 'Código de barras EAN/UPC' })
-  @IsOptional() @IsString() @MaxLength(14)
+  @ApiPropertyOptional() @IsOptional() @IsString() @MaxLength(14)
   barcode?: string;
 
-  @ApiProperty({ example: 2899.9, description: 'Precio unitario (decimal con 2 dígitos)' })
-  @IsNumber() @IsPositive()
-  price: number;
+  @ApiPropertyOptional() @IsOptional() @IsString() @MaxLength(8) @trim()
+  unit?: string = 'UN';
 
-  @ApiProperty({ example: 15, description: 'Stock disponible' })
-  @IsNumber() @Min(0)
-  stock: number;
+  @ApiPropertyOptional() @IsOptional() @Type(() => Number) @IsNumber() @Min(0)
+  cost?: number = 0;
 
-  @ApiPropertyOptional({ example: 'Alimentos', description: 'Categoría del producto' })
+  @ApiProperty() @Type(() => Number) @IsNumber() @IsPositive()
+  price!: number;
+
+  @ApiPropertyOptional({ description: '0 | 10.5 | 21 | 27' })
+  @IsOptional() @Type(() => Number) @IsNumber()
+  @IsIn([0, 10.5, 21, 27], { message: 'IVA inválido (0, 10.5, 21 o 27)' })
+  vat?: number = 21;
+
+  @ApiPropertyOptional() @IsOptional() @Type(() => Number) @IsNumber() @Min(0)
+  stock?: number = 0;
+
+  @ApiPropertyOptional({ enum: ProductStatus })
+  @IsOptional() @IsEnum(ProductStatus)
+  status?: ProductStatus = ProductStatus.ACTIVE;
+
+  // 👇 volver a incluir category
+  @ApiPropertyOptional({ example: 'Bebidas' })
   @IsOptional() @IsString() @MaxLength(40)
   category?: string;
 
-  @ApiProperty({ enum: ProductStatus, example: ProductStatus.ACTIVE, description: 'Estado actual' })
-  @IsEnum(ProductStatus)
-  status: ProductStatus;
-
-  @ApiPropertyOptional({ example: 'Tueste medio, molienda fina.', description: 'Descripción larga' })
+  @ApiPropertyOptional()
   @IsOptional() @IsString() @MaxLength(500)
   description?: string;
 }
-

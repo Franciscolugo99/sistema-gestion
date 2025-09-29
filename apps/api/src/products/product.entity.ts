@@ -68,4 +68,14 @@ price: number; // gracias al transformer lo usás como number en TS
 
   @VersionColumn()
   version: number;
+
+  @Column({ length: 8, nullable: true })
+  unit?: string; // UN / KG / LT, etc.
+
+  @Column({ type: 'decimal', precision: 12, scale: 2, default: 0, transformer: decimalTransformer })
+  cost: number;
+
+  // IVA con 1 decimal: 0, 10.5, 21, 27
+  @Column({ type: 'decimal', precision: 4, scale: 1, default: 21, transformer: decimalTransformer })
+  vat: number;
 }
