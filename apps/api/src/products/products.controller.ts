@@ -1,11 +1,12 @@
-import { Controller, Get, Post, Patch, Delete, Param, Body, Query } from '@nestjs/common';
+// apps/api/src/products/products.controller.ts
+import { Controller, Get, Post, Patch, Delete, Param, Body, Query, ParseUUIDPipe } from '@nestjs/common';
 import { ApiTags, ApiResponse, ApiQuery, ApiParam } from '@nestjs/swagger';
 import { ProductsService } from './products.service';
 import { CreateProductDto } from './dto/create-product.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
 import { ProductStatus } from './product.entity';
 
-@ApiTags('products')                // ← agrupa en la sección "products" en /docs
+@ApiTags('products')
 @Controller('products')
 export class ProductsController {
   constructor(private readonly svc: ProductsService) {}
@@ -19,28 +20,35 @@ export class ProductsController {
   @Patch(':id')
   @ApiParam({ name: 'id', description: 'UUID del producto' })
   @ApiResponse({ status: 200, description: 'Producto actualizado' })
-  update(@Param('id') id: string, @Body() dto: UpdateProductDto) {
+  update(@Param('id', new ParseUUIDPipe()) id: string, @Body() dto: UpdateProductDto) {
     return this.svc.update(id, dto);
   }
 
   @Delete(':id')
   @ApiParam({ name: 'id', description: 'UUID del producto' })
   @ApiResponse({ status: 200, description: 'Producto eliminado (soft delete)' })
-  remove(@Param('id') id: string) {
+  remove(@Param('id', new ParseUUIDPipe()) id: string) {
     return this.svc.softDelete(id);
   }
 
   @Post(':id/restore')
   @ApiParam({ name: 'id', description: 'UUID del producto' })
   @ApiResponse({ status: 200, description: 'Producto restaurado' })
-  restore(@Param('id') id: string) {
+  restore(@Param('id', new ParseUUIDPipe()) id: string) {
     return this.svc.restore(id);
+  }
+
+  // 👇 RUTA FIJA PRIMERO para que no choque con :id
+  @Get('low-stock')
+  @ApiQuery({ name: 'limit', required: false, example: 50 })
+  lowStock(@Query('limit') limit = '50') {
+    return this.svc.lowStock(Number(limit));
   }
 
   @Get(':id')
   @ApiParam({ name: 'id', description: 'UUID del producto' })
   @ApiResponse({ status: 200, description: 'Detalle del producto' })
-  get(@Param('id') id: string) {
+  get(@Param('id', new ParseUUIDPipe()) id: string) {
     return this.svc.findById(id);
   }
 

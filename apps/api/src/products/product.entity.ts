@@ -78,4 +78,8 @@ price: number; // gracias al transformer lo usás como number en TS
   // IVA con 1 decimal: 0, 10.5, 21, 27
   @Column({ type: 'decimal', precision: 4, scale: 1, default: 21, transformer: decimalTransformer })
   vat: number;
+  // apps/api/src/products/product.entity.ts
+
+  @Column({ type: 'int', default: 0 }) stockQty: number; // stock actual
+  @Column({ type: 'int', default: 0 }) minStock: number; // umbral de alerta
 }
