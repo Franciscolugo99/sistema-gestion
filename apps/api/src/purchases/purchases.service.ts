@@ -21,37 +21,40 @@ export class PurchasesService {
       const prods = await prodRepo.find({ where: { id: In(ids) } });
       const byId = new Map(prods.map(p => [p.id, p]));
 
+      // 1) crear compra SIN encadenar save(create(...))
+      const purchase = purRepo.create({ total: '0' });
+      await purRepo.save(purchase);
+
       let total = 0;
-      const purchase = await purRepo.save(purRepo.create({ total: 0 }));
 
       for (const i of items) {
         const p = byId.get(i.productId);
         if (!p) throw new BadRequestException(`Producto no existe: ${i.productId}`);
 
-        total += (i.cost ?? p.cost ?? 0) * i.qty;
+        // si no mandan cost, uso el cost del producto; p.cost puede ser number -> normalizo a number
+        const unitCost = i.cost ?? Number(p.cost ?? 0);
+        total += unitCost * i.qty;
 
-        await itemRepo.save(itemRepo.create({
+        // 2) guardar item (cost como string por ser numeric)
+        const item = itemRepo.create({
           purchase,
           product: { id: i.productId } as any,
           qty: i.qty,
-          cost: i.cost ?? p.cost ?? 0,
-        }));
+          cost: String(unitCost),
+        });
+        await itemRepo.save(item);
 
-        // actualiza costo si se pasa
-        if (i.cost !== undefined) {
-          p.cost = i.cost;
-        }
+        // 3) si pasaron cost, actualizo el costo en el producto
+        const patch: Partial<Product> = i.cost !== undefined ? { cost: i.cost } : {};
+await prodRepo
+  .createQueryBuilder()
+  .update(Product)
+  .set({ stockQty: () => `"stock" + ${i.qty}`, ...patch }) // 👈 columna real
+  .where('id = :id', { id: i.productId })
+  .execute();
 
-        // suma stock
-        await prodRepo
-          .createQueryBuilder()
-          .update(Product)
-          .set({ stockQty: () => `"stockQty" + ${i.qty}`, cost: p.cost })
-          .where("id = :id", { id: i.productId })
-          .execute();
-      }
-
-      purchase.total = total.toString();
+      // 4) actualizar total (string)
+      purchase.total = String(total);
       await purRepo.save(purchase);
 
       return { purchaseId: purchase.id, total };

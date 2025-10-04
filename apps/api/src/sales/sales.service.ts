@@ -1,17 +1,18 @@
+// src/sales/sales.service.ts
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { DataSource, In } from 'typeorm';
 import { Product } from '../products/product.entity';
 import { Sale } from './sale.entity';
 import { SaleItem } from './saleItem.entity';
 import { Payment } from './payment.entity';
+import { CreateSaleDto } from './dto/create-sale.dto';
 
 @Injectable()
 export class SalesService {
   constructor(private ds: DataSource) {}
 
-  // versión simple (transaccional) – descuenta stock
-  async create(body: { items: { productId: string; qty: number; price: number; vat: number }[]; payments: { method: string; amount: number }[]; }) {
-    const { items = [], payments = [] } = body || {};
+  async create(dto: CreateSaleDto) {
+    const { items = [], payments = [] } = dto || {};
     if (!items.length) throw new BadRequestException('Sin items');
 
     return this.ds.transaction(async (trx) => {
@@ -24,42 +25,46 @@ export class SalesService {
       const prods = await prodRepo.find({ where: { id: In(ids) } });
       const byId = new Map(prods.map(p => [p.id, p]));
 
+      // validar stock
       for (const i of items) {
         const p = byId.get(i.productId);
         if (!p) throw new BadRequestException(`Producto no existe: ${i.productId}`);
-        if ((p as any).stockQty !== undefined && p['stockQty'] < i.qty)
-          throw new BadRequestException(`Stock insuficiente de ${p.name}`);
+        const current = (p as any).stockQty ?? 0;
+        if (current < i.qty) throw new BadRequestException(`Stock insuficiente de ${p.name} (hay ${current})`);
       }
 
-      const total = items.reduce((a, i) => a + i.price * i.qty, 0);
-      const pagado = payments.reduce((a, p) => a + Number(p.amount || 0), 0);
-      if (Math.round(pagado * 100) !== Math.round(total * 100))
-        throw new BadRequestException(`Importe pagado ${pagado} != total ${total}`);
+      const totalNum = items.reduce((a, i) => a + i.price * i.qty, 0);
+      const paidNum  = payments.reduce((a, p) => a + Number(p.amount || 0), 0);
+      if (Math.round(paidNum * 100) !== Math.round(totalNum * 100))
+        throw new BadRequestException(`Importe pagado ${paidNum} != total ${totalNum}`);
 
-      const sale = await saleRepo.save(saleRepo.create({ subtotal: total, total }));
+      // ❗️ NO encadenar save(create(...))
+      const sale = saleRepo.create({ subtotal: String(totalNum), total: String(totalNum) });
+      await saleRepo.save(sale);
 
       for (const i of items) {
-        await itemRepo.save(itemRepo.create({
+        const si = itemRepo.create({
           sale,
           product: { id: i.productId } as any,
           qty: i.qty,
-          price: i.price,
-          vat: i.vat,
-        }));
-        // descuenta stock si existe el campo
-        await prodRepo
-          .createQueryBuilder()
-          .update(Product)
-          .set({ stockQty: () => `"stockQty" - ${i.qty}` })
-          .where("id = :id", { id: i.productId })
-          .execute();
-      }
+          price: String(i.price),
+          vat: String(i.vat),
+        });
+        await itemRepo.save(si);
+
+await prodRepo
+  .createQueryBuilder()
+  .update(Product)
+  .set({ stockQty: () => `"stock" - ${i.qty}` }) // 👈 columna real
+  .where('id = :id', { id: i.productId })
+  .execute();
 
       for (const p of payments) {
-        await payRepo.save(payRepo.create({ sale, method: p.method as any, amount: p.amount as any }));
+        const pay = payRepo.create({ sale, method: p.method, amount: String(p.amount) });
+        await payRepo.save(pay);
       }
 
-      return { saleId: sale.id, total };
+      return { saleId: sale.id, total: totalNum };
     });
   }
 }

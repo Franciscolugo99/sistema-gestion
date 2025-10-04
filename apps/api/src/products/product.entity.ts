@@ -1,3 +1,4 @@
+// apps/api/src/products/product.entity.ts
 import {
   Entity,
   PrimaryGeneratedColumn,
@@ -18,68 +19,69 @@ export enum ProductStatus {
 @Entity('products')
 @Index(['nameLower'], { unique: true, where: `"deleted_at" IS NULL` })
 @Index(['skuLower'],  { unique: true, where: `"deleted_at" IS NULL` })
-@Index(['barcode'],   { unique: true, where: `"deleted_at" IS NULL AND "barcode" IS NOT NULL`,
+@Index(['barcode'], {
+  unique: true,
+  where: `"deleted_at" IS NOT NULL AND "barcode" IS NOT NULL`,
 })
 export class Product {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
-  @Column({ length: 120 })
-  name: string;
+  @Column({ length: 120 }) name: string;
+  @Column({ length: 120, select: false }) nameLower: string;
 
-  @Column({ length: 120, select: false })
-  nameLower: string; // unicidad case-insensitive
-
-  @Column({ length: 32 })
-  sku: string;
-
-  @Column({ length: 32, select: false })
-  skuLower: string;
+  @Column({ length: 32 }) sku: string;
+  @Column({ length: 32, select: false }) skuLower: string;
 
   @Column({ type: 'varchar', length: 14, nullable: true })
-  barcode: string | null; // dígitos normalizados (sin espacios/guiones)
+  barcode: string | null;
 
-  @Column({ type: 'decimal', precision: 12, scale: 2, transformer: decimalTransformer })
-price: number; // gracias al transformer lo usás como number en TS
+  @Column({
+    type: 'decimal',
+    precision: 12,
+    scale: 2,
+    transformer: decimalTransformer,
+  })
+  price: number;
 
-  @Column({ type: 'int', default: 0 })
-  stock: number;
+  // 👇 Usamos la columna existente "stock" de la BD
+  @Column({ type: 'int', name: 'stock', default: 0 })
+  stockQty: number;
+  // 👇 Umbral de alerta (si no existe la columna, ver nota abajo)
+  @Column({ type: 'int', name: 'minstock', default: 0 })
+  minStock: number;
 
-  @Column({ type: 'text', nullable: true })
-  description?: string;
-
-  @Column({ type: 'varchar', length: 40, nullable: true })
-  category?: string;
+  @Column({ type: 'text', nullable: true }) description?: string;
+  @Column({ type: 'varchar', length: 40, nullable: true }) category?: string;
 
   @Column({ type: 'enum', enum: ProductStatus, default: ProductStatus.ACTIVE })
   status: ProductStatus;
 
-  @Column({ length: 140, nullable: true })
-  slug?: string;
+  @Column({ length: 140, nullable: true }) slug?: string;
 
-  @CreateDateColumn()
-  createdAt: Date;
+  @CreateDateColumn() createdAt: Date;
+  @UpdateDateColumn() updatedAt: Date;
+  @DeleteDateColumn({ name: 'deleted_at', nullable: true }) deletedAt?: Date | null;
+  @VersionColumn() version: number;
 
-  @UpdateDateColumn()
-  updatedAt: Date;
+  @Column({ length: 8, nullable: true }) unit?: string;
 
-  @DeleteDateColumn({ name: 'deleted_at', nullable: true })
-  deletedAt?: Date | null;
-
-  @VersionColumn()
-  version: number;
-
-  @Column({ length: 8, nullable: true })
-  unit?: string; // UN / KG / LT, etc.
-
-  @Column({ type: 'decimal', precision: 12, scale: 2, default: 0, transformer: decimalTransformer })
+  @Column({
+    type: 'decimal',
+    precision: 12,
+    scale: 2,
+    default: 0,
+    transformer: decimalTransformer,
+  })
   cost: number;
 
   // IVA con 1 decimal: 0, 10.5, 21, 27
-  @Column({ type: 'decimal', precision: 4, scale: 1, default: 21, transformer: decimalTransformer })
+  @Column({
+    type: 'decimal',
+    precision: 4,
+    scale: 1,
+    default: 21,
+    transformer: decimalTransformer,
+  })
   vat: number;
-  // apps/api/src/products/product.entity.ts
-
-  @Column({ type: 'int', default: 0 }) stockQty: number; // stock actual
-  @Column({ type: 'int', default: 0 }) minStock: number; // umbral de alerta
 }

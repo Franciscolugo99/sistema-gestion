@@ -25,14 +25,14 @@ export class ProductsService {
     return p;
   }
   async lowStock(limit = 50) {
-    const items = await this.repo
+    const qb = this.repo
       .createQueryBuilder('p')
-      .where('p.deletedAt IS NULL') // quita esto si NO usas soft delete
-      .andWhere('p.stockQty <= p.minStock')
-      .andWhere('p.stockQty >= 0')
-      .orderBy('p.stockQty', 'ASC')
-      .take(Math.min(limit, 200))
-      .getMany();
+      .where('p.deleted_at IS NULL')
+      .andWhere(`p."stock" <= p."minstock"`)
+      .andWhere(`p."stock" >= 0`)
+      .orderBy(`p."stock"`, 'ASC')
+      .take(Math.min(limit, 200));
+    const items = await qb.getMany();
     return { items, total: items.length };
   }
   async create(dto: CreateProductDto) {
