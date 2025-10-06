@@ -18,29 +18,13 @@ interface Product {
 const API = "/api"; // usa el proxy de Vite
 
 export default function App() {
-  // ======= STATE =======
+  // ======= STATE BASE =======
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string>("");
   const [view, setView] = useState<"productos" | "pos">("productos");
-  const [lowCount, setLowCount] = useState<number>(0);
 
-  const loadLowStock = async () => {
-  try {
-    const { data } = await axios.get(`/api/products/low-stock?limit=200`);
-    const list = Array.isArray(data) ? data : data?.items || [];
-    setLowCount(list.length || data?.total || 0);
-  } catch {
-    setLowCount(0);
-  }
-};
-  // ======= EFFECTS =======
-  useEffect(() => {
-    load();
-    loadLowStock();   // 👈 llamada inicial para traer alertas
-  }, []);
-
-  // form: si tiene id -> modo edición
+  // ======= FORM (debe ir ANTES de cualquier uso de 'form') =======
   const [form, setForm] = useState<Partial<Product>>({
     sku: "",
     name: "",
@@ -51,7 +35,7 @@ export default function App() {
     vat: 21,
   });
 
-  // ======= HELPERS =======
+  // ======= DERIVADOS DEL FORM =======
   const isEditing = Boolean(form.id);
   const isValid =
     (form.name || "").trim().length > 0 &&
@@ -81,7 +65,6 @@ export default function App() {
     e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>
   ) => {
     const { name, value } = e.target;
-    // normalizamos numéricos
     if (["cost", "price", "vat"].includes(name)) {
       const num = value === "" ? "" : Number(value);
       setForm((f) => ({ ...f, [name]: (num as unknown) as number }));
@@ -90,7 +73,13 @@ export default function App() {
     }
   };
 
-  // ======= API =======
+  // ======= STOCK BAJO =======
+  const [lowCount, setLowCount] = useState<number>(0); // badge
+  const [lowOpen, setLowOpen] = useState(false);       // modal
+  const [lowItems, setLowItems] = useState<Product[]>([]);
+  const [lowError, setLowError] = useState<string>("");
+
+  // ======= API HELPERS =======
   const pickArray = (payload: any) => {
     const candidates = [
       payload,
@@ -111,7 +100,6 @@ export default function App() {
     setError("");
     try {
       const resp = await axios.get(`${API}/products`, { validateStatus: () => true });
-      console.log("[GET /products]", resp.status, resp.data);
       if (resp.status >= 400) throw new Error(`GET /products devolvió ${resp.status}`);
       const list = pickArray(resp.data);
       setProducts(list as Product[]);
@@ -124,6 +112,32 @@ export default function App() {
     }
   };
 
+  const fetchLowStockCount = async () => {
+    try {
+      const { data } = await axios.get(`${API}/products/low-stock?limit=200`, { validateStatus: () => true });
+      const list = Array.isArray(data) ? data : data?.items || [];
+      setLowCount(list.length || data?.total || 0);
+    } catch {
+      setLowCount(0);
+    }
+  };
+
+  const openLowStock = async () => {
+    try {
+      setLowError("");
+      const resp = await axios.get(`${API}/products/low-stock?limit=200`, { validateStatus: () => true });
+      if (resp.status >= 400) throw new Error("No se pudo cargar el stock bajo");
+      const list = Array.isArray(resp.data) ? resp.data : resp.data?.items ?? [];
+      setLowItems(list as Product[]);
+      setLowCount(list.length || resp.data?.total || 0);
+      setLowOpen(true);
+    } catch (e: any) {
+      setLowError(e?.message ?? "Error al cargar stock bajo");
+      setLowOpen(true);
+    }
+  };
+
+  // ======= SAVE / DELETE =======
   const save = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!isValid) return;
@@ -145,18 +159,19 @@ export default function App() {
       name: clean(form.name)!,
       barcode: cleanBarcode(form.barcode),
       unit: clean(form.unit) ?? "UN",
-      cost: form.cost === undefined || form.cost === null ? 0 : Number(form.cost),
-      price: form.price === undefined || form.price === null ? 0 : Number(form.price),
-      vat: form.vat === undefined || form.vat === null ? 0 : Number(form.vat),
+      cost: form.cost == null ? 0 : Number(form.cost),
+      price: form.price == null ? 0 : Number(form.price),
+      vat: form.vat == null ? 0 : Number(form.vat),
     };
 
     try {
       if (isEditing && form.id) {
-        await axios.patch(`${API}/products/${form.id}`, payload); // ← PATCH (tu API)
+        await axios.patch(`${API}/products/${form.id}`, payload);
       } else {
         await axios.post(`${API}/products`, payload);
       }
       await load();
+      await fetchLowStockCount();
       resetForm();
     } catch (err: any) {
       const msg =
@@ -180,7 +195,6 @@ export default function App() {
       cost: p.cost ?? 0,
       price: p.price ?? 0,
       vat: p.vat ?? 21,
-      // is_active intencionalmente no se envía en save()
     });
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
@@ -192,6 +206,7 @@ export default function App() {
     try {
       await axios.delete(`${API}/products/${id}`);
       await load();
+      await fetchLowStockCount();
       if (form.id === id) resetForm();
     } catch (err: any) {
       console.error(err);
@@ -204,26 +219,27 @@ export default function App() {
   // ======= EFFECTS =======
   useEffect(() => {
     load();
+    fetchLowStockCount();
   }, []);
 
   // ======= UI =======
   return (
     <div style={{ maxWidth: 1100, margin: "0 auto", padding: 24 }}>
-{/* NAV para cambiar de vista + badge de stock bajo */}
-<div style={{ display: "flex", gap: 8, marginBottom: 16, alignItems: "center" }}>
-  <button onClick={() => setView("productos")} disabled={view === "productos"}>
-    Productos
-  </button>
-  <button onClick={() => setView("pos")} disabled={view === "pos"}>
-    POS (Ventas)
-  </button>
+      {/* NAV + badge stock bajo */}
+      <div style={{ display: "flex", gap: 8, marginBottom: 16, alignItems: "center" }}>
+        <button onClick={() => setView("productos")} disabled={view === "productos"}>
+          Productos
+        </button>
+        <button onClick={() => setView("pos")} disabled={view === "pos"}>
+          POS (Ventas)
+        </button>
 
-  <div style={{ marginLeft: "auto" }}>
-    <button onClick={loadLowStock} title="Actualizar alertas">
-      Stock bajo{lowCount ? ` (${lowCount})` : ""}
-    </button>
-  </div>
-</div>
+        <div style={{ marginLeft: "auto" }}>
+          <button onClick={openLowStock} title="Ver productos con stock bajo">
+            Stock bajo{lowCount ? ` (${lowCount})` : ""}
+          </button>
+        </div>
+      </div>
 
       {view === "productos" && (
         <>
@@ -374,11 +390,94 @@ export default function App() {
       )}
 
       {view === "pos" && <Pos />}
+
+      {/* ========= MODAL STOCK BAJO ========= */}
+      {lowOpen && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.6)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 50,
+          }}
+        >
+          <div
+            style={{
+              background: "#111",
+              padding: 16,
+              width: 700,
+              maxHeight: "80vh",
+              overflow: "auto",
+              borderRadius: 8,
+            }}
+          >
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                marginBottom: 12,
+              }}
+            >
+              <h3 style={{ margin: 0 }}>Productos con stock bajo</h3>
+              <button onClick={() => setLowOpen(false)}>Cerrar</button>
+            </div>
+
+            {lowError && (
+              <div style={{ color: "#ff6b6b", marginBottom: 8 }}>{lowError}</div>
+            )}
+
+            {lowItems.length === 0 && !lowError ? (
+              <div>No hay productos con stock bajo.</div>
+            ) : (
+              <div style={{ overflowX: "auto" }}>
+                <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                  <thead>
+                    <tr>
+                      <th style={{ textAlign: "left" }}>SKU</th>
+                      <th style={{ textAlign: "left" }}>Nombre</th>
+                      <th style={{ textAlign: "left" }}>Stock</th>
+                      <th style={{ textAlign: "left" }}>Mínimo</th>
+                      <th style={{ textAlign: "left" }}>Precio</th>
+                      <th></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {lowItems.map((p) => (
+                      <tr key={p.id}>
+                        <td>{p.sku}</td>
+                        <td>{p.name}</td>
+                        <td>{(p as any).stock ?? 0}</td>
+                        <td>{(p as any).minStock ?? 0}</td>
+                        <td>${p.price}</td>
+                        <td style={{ textAlign: "right" }}>
+                          <button
+                            onClick={() => {
+                              handleEdit(p);
+                              setLowOpen(false);
+                            }}
+                          >
+                            Editar
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+      {/* ========= /MODAL STOCK BAJO ========= */}
     </div>
   );
 }
 
-// ======= estilos mínimos inline para la tabla (podés reemplazar por tu CSS) =======
+// ======= estilos mínimos inline para la tabla =======
 const th: React.CSSProperties = {
   textAlign: "left",
   padding: "10px 8px",
