@@ -11,7 +11,9 @@ interface Product {
   unit: string;
   cost: number;
   price: number;
-  vat: number; // % (ej: 21)
+  vat: number;
+  stock?: number;      // 👈 nuevo
+  minStock?: number;   // 👈 nuevo
   is_active?: boolean;
 }
 
@@ -33,6 +35,8 @@ export default function App() {
     cost: 0,
     price: 0,
     vat: 21,
+    stock: 0,        // 👈
+    minStock: 0,     // 👈
   });
 
   // ======= DERIVADOS DEL FORM =======
@@ -154,15 +158,18 @@ export default function App() {
       return digits === "" ? undefined : digits;
     };
 
-    const payload = {
-      sku: clean(form.sku),
-      name: clean(form.name)!,
-      barcode: cleanBarcode(form.barcode),
-      unit: clean(form.unit) ?? "UN",
-      cost: form.cost == null ? 0 : Number(form.cost),
-      price: form.price == null ? 0 : Number(form.price),
-      vat: form.vat == null ? 0 : Number(form.vat),
-    };
+const payload = {
+  sku: clean(form.sku),
+  name: clean(form.name)!,
+  barcode: cleanBarcode(form.barcode),
+  unit: clean(form.unit) ?? "UN",
+  cost: form.cost == null ? 0 : Number(form.cost),
+  price: form.price == null ? 0 : Number(form.price),
+  vat: form.vat == null ? 0 : Number(form.vat),
+  stock: form.stock == null ? 0 : Number(form.stock),           // 👈
+  minStock: form.minStock == null ? 0 : Number(form.minStock),  // 👈
+};
+
 
     try {
       if (isEditing && form.id) {
@@ -170,9 +177,9 @@ export default function App() {
       } else {
         await axios.post(`${API}/products`, payload);
       }
-      await load();
-      await fetchLowStockCount();
-      resetForm();
+        await load();          // recarga lista principal
+        await loadLowStock();  // actualiza el contador de stock bajo
+        resetForm();           // limpia formulario
     } catch (err: any) {
       const msg =
         err?.response?.data?.message ||
@@ -185,19 +192,21 @@ export default function App() {
     }
   };
 
-  const handleEdit = (p: Product) => {
-    setForm({
-      id: p.id,
-      sku: p.sku ?? "",
-      name: p.name,
-      barcode: p.barcode ?? "",
-      unit: p.unit ?? "UN",
-      cost: p.cost ?? 0,
-      price: p.price ?? 0,
-      vat: p.vat ?? 21,
-    });
-    window.scrollTo({ top: 0, behavior: "smooth" });
-  };
+const handleEdit = (p: Product) => {
+  setForm({
+    id: p.id,
+    sku: p.sku ?? "",
+    name: p.name,
+    barcode: p.barcode ?? "",
+    unit: p.unit ?? "UN",
+    cost: p.cost ?? 0,
+    price: p.price ?? 0,
+    vat: p.vat ?? 21,
+    stock: p.stock ?? 0,        // 👈
+    minStock: p.minStock ?? 0,  // 👈
+  });
+  window.scrollTo({ top: 0, behavior: "smooth" });
+};
 
   const handleDelete = async (id: string) => {
     if (!confirm("¿Seguro que querés eliminar este producto?")) return;
@@ -316,6 +325,27 @@ export default function App() {
                 <option value={27}>27%</option>
               </select>
             </div>
+                <div>
+                  <label>Stock</label>
+                  <input
+                  name="stock"
+                  type="number"
+                  step="1"
+                  value={form.stock ?? 0}
+                  onChange={onChange}
+                  />
+              </div>
+
+<div>
+  <label>Mín. stock</label>
+  <input
+    name="minStock"
+    type="number"
+    step="1"
+    value={form.minStock ?? 0}
+    onChange={onChange}
+  />
+</div>
 
             <div style={{ gridColumn: "1 / -1", display: "flex", gap: 8, marginTop: 8 }}>
               <button type="submit" disabled={!isValid || loading}>

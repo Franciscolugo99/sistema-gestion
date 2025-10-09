@@ -45,7 +45,7 @@ export class CreateProductDto {
   // 👇 campos de stock que existen en la entidad
   @ApiPropertyOptional({ description: 'Stock inicial' })
   @IsOptional() @Type(() => Number) @IsNumber() @Min(0)
-  stockQty: number = 0;
+  stock: number = 0;              // <- antes era stockQty
 
   @ApiPropertyOptional({ description: 'Umbral para alerta de stock bajo' })
   @IsOptional() @Type(() => Number) @IsNumber() @Min(0)
